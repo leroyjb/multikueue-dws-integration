@@ -55,11 +55,16 @@ for i in "${!regions[@]}"; do
         cluster_name="$PREFIX_WORKER-$region"
     fi
 
-    opId=$(gcloud container operations list --filter "TARGET=https://container.googleapis.com/v1/projects/$PROJECT_NUMBER/locations/$region/clusters/$cluster_name" --format="value(name)")
-    gcloud container operations wait "$opId" --project "$PROJECT_ID" --region "$region"
-    gcloud container clusters get-credentials "$cluster_name" \
+    # opId=$(gcloud container operations list --filter "TARGET=https://container.googleapis.com/v1/projects/$PROJECT_NUMBER/locations/$region/clusters/$cluster_name" --format="value(name)")
+    #gcloud container operations wait "$opId" --project "$PROJECT_ID" --region "$region"
+    set +e
+    until gcloud -q container clusters get-credentials "$cluster_name" \
         --project "$PROJECT_ID" \
-        --region "$region"
+        --region "$region"; do
+        echo "GKE Cluster is provisioning. Retrying in 15 seconds..."
+        sleep 15
+    done
+    set -e
     configname="${kubeconfigs[$i]}"
     kubectl config rename-context "gke_$PROJECT_ID"_"$region"_"$cluster_name" "$configname"
 done

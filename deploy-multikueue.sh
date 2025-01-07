@@ -18,7 +18,8 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-KUEUE_VERSION=v0.8.1
+KUEUE_VERSION=v0.10.0
+KFLOW_VERSION=v1.8.0
 regions=("europe-west4" "asia-southeast1" "us-east4" "europe-west4")
 kubeconfigs=("manager-europe-west4" "worker-asia-southeast1" "worker-us-east4" "worker-eu-west4")
 PROJECT_ID=$(gcloud config get-value project)
@@ -47,15 +48,23 @@ for i in "${!kubeconfigs[@]}"; do
 done
 kubectl wait --for=condition=available --timeout=600s deployment/kueue-controller-manager -n kueue-system
 kubectl patch deployment kueue-controller-manager -n kueue-system --patch \
-    '{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--config=/controller_manager_config.yaml","--zap-log-level=8","--feature-gates=MultiKueue=true"]}]}}}}'
+    '{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--config=/controller_manager_config.yaml","--zap-log-level=8"]}]}}}}'
+kubectl apply -k "github.com/kubeflow/training-operator.git/manifests/base/crds?ref=$KFLOW_VERSION"
 kubectl apply --server-side -f dws-multi.yaml
 
 for i in "${!kubeconfigs[@]}"; do
     config="${kubeconfigs[$i]}"
     if [[ $i -ne 0 ]]; then
         kubectl config use-context $config
-        kubectl apply --server-side -f dws-multi-worker.yaml
         kubectl wait --for=condition=available --timeout=600s deployment/kueue-controller-manager -n kueue-system
+        kubectl apply --server-side -f dws-multi-worker.yaml
         kubectl apply --server-side -f prom.yaml
+        kubectl apply --server-side -k "github.com/kubeflow/training-operator.git/manifests/overlays/standalone?ref=v1.8.1"
+        kubectl delete crds mpijobs.kubeflow.org
+        kubectl apply --server-side -f https://raw.githubusercontent.com/kubeflow/mpi-operator/master/deploy/v2beta1/mpi-operator.yaml --force-conflicts
+
     fi
 done
+
+kubectl config use-context "${kubeconfigs[0]}"
+kubectl rollout restart deployment -n kueue-system kueue-controller-manager
